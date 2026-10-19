@@ -1,0 +1,4 @@
+spec:
+  postgresql:
+    synchronous:
+      dataDurability: preferred

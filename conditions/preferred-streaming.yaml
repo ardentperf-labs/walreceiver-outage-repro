@@ -1,0 +1,7 @@
+spec:
+  postgresql:
+    synchronous:
+      dataDurability: preferred
+  probes:
+    readiness:
+      type: streaming

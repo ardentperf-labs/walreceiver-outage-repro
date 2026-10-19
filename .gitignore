@@ -1,0 +1,3 @@
+.repro.env
+kubeconfig
+results/*.log

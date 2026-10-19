@@ -1,0 +1,36 @@
+# Each instance gets its own node and separate uncached DATA/WAL HDDs.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: hdd
+provisioner: disk.csi.azure.com
+parameters:
+  skuName: Standard_LRS
+  cachingMode: None
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+spec:
+  instances: 2
+  imageName: ghcr.io/cloudnative-pg/postgresql:18
+  affinity:
+    podAntiAffinityType: required
+  storage:
+    size: 64Gi
+    storageClass: hdd
+  walStorage:
+    size: 64Gi
+    storageClass: hdd
+  postgresql:
+    synchronous:
+      method: any
+      number: 1
+  backup:
+    barmanObjectStore:
+      destinationPath: https://AZURE_ACCOUNT.blob.core.windows.net/backups
+      azureCredentials:
+        storageAccount: {name: azure, key: account}
+        storageKey: {name: azure, key: key}
