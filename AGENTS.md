@@ -102,9 +102,8 @@ Do not provision Azure resources merely to edit documentation.
 The main reproduction and all conditions except the preserved VACUUM variation
 use checkpoint + 5% UPDATE, with disconnect only after successful commit and
 resumed pgbench writes. Record UPDATE start/completion as the purple operation
-events. Preserve historical VACUUM evidence and label new results accurately.
-Existing condition images live in `variations/vacuum-history/`; new condition
-images use the condition prefixes directly under `variations/`.
+events. Preserve the standalone VACUUM variation's evidence and label new results
+accurately. Variation images use their respective prefixes under `variations/`.
 For the prefetch-off condition, capture waits about one minute after disconnect
 regardless of how many sessions are waiting on `SyncRep` or whether TPS stalls.
 
