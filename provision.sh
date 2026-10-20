@@ -16,7 +16,7 @@ trap './cleanup.sh; exit 1' ERR INT TERM
 az group create -n "$RG" -l "$LOCATION" -o none
 az storage account create -g "$RG" -n "$STORAGE_ACCOUNT" -l "$LOCATION" \
   --sku Standard_LRS -o none
-az aks create -g "$RG" -n repro --node-count 2 --node-vm-size Standard_D2s_v4 \
+az aks create -g "$RG" -n repro --node-count 2 --node-vm-size Standard_D2s_v6 \
   --tier free --generate-ssh-keys -o none
 az aks get-credentials -g "$RG" -n repro --file "$KUBECONFIG" -o none
 printf 'NODE_RG=%q\n' "$(az aks show -g "$RG" -n repro --query nodeResourceGroup -o tsv)" >> .repro.env

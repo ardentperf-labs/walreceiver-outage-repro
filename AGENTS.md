@@ -4,6 +4,110 @@ Keep screenshot tooling temporary, outside the repository. Document the
 reproduction in README.md; put capture instructions only in this file.
 Do not provision Azure resources merely to edit documentation.
 
+## Concurrent runs and regional preflight
+
+- Give each run its own working directory, `.repro.env`, absolute kubeconfig,
+  browser profile, terminal/CDP ports, native logs, and resource-group IDs.
+  Keep temporary tooling outside the repository. If a reboot is planned, save
+  the run state and restart notes outside `/tmp`, which can be cleared on reboot.
+- One coordinator should check running experiments, regional total vCPU quota,
+  the requested VM-family quota, SKU restrictions, and existing Network Watchers.
+  Reserve capacity for all concurrent runs before releasing agents. Read the
+  latest assignment after any user change; stale region or generation checks
+  do not authorize provisioning.
+- The current UPDATE runs use `Standard_D2s_v6` in US regions. Its quota family
+  is `StandardDsv6Family`; do not check the v4 family for a v6 deployment.
+  Distinguish `Location` restrictions from `Zone` restrictions. The recipe uses
+  regional deployment without `--zones`; zonal restrictions alone are not a
+  region-wide prohibition. An actual allocation failure still needs handling.
+- In this environment, the Azure CLI credential wrapper holds a global lock
+  for an entire command. Avoid duplicate `az vm list-skus` calls. In temporary
+  provisioning/cleanup copies, use `az aks create --no-wait` and resource-group
+  deletion with `--no-wait`, followed by short status/absence polls, so one long
+  command does not block every run. Do not bypass or modify the credential wrapper.
+- Agents should write separate result snippets; one coordinator integrates the
+  shared READMEs and removes only newly created regional Network Watchers after
+  all runs using those regions finish. Preserve the recorded watcher baseline.
+
+## Validate temporary runners before provisioning
+
+- Finish editing runner/provisioning scripts before launching them. Run `bash -n`
+  on shell scripts and compile Python source in memory. Never edit a shell script
+  while it is executing; Bash can read the changed file and fail midway through
+  provisioning. Stop at a safe boundary and launch a validated replacement instead.
+- Exercise subprocess helpers with harmless local commands before creating cloud
+  resources. `subprocess.run(capture_output=True)` cannot also receive explicit
+  `stdout` or `stderr`; choose either captured output or explicit redirection.
+  Validate argument types too: pass a pod's `metadata.name`, not its JSON object.
+  Exercise actual event-logger call shapes, including capture metadata; a keyword
+  such as `name` must not collide with the logger's positional event-name argument.
+- Give every `kubectl` subprocess the run's absolute `--kubeconfig` or explicit
+  `KUBECONFIG` environment, including Python helpers, detached launchers, observers,
+  and log collectors. Sourcing `.repro.env` in a child shell does not update its
+  parent Python process. Verify the intended API endpoint and pod access before
+  initialization; a connection to `localhost:8080` indicates missing configuration.
+- Smoke-check the real terminal and Portal capture paths before the measured
+  workload. xterm renders terminal cells on canvas, so `.xterm-screen.inner_text()`
+  is not a reliable readiness check. Use the live screenshot and, if available,
+  accessibility rows from screen-reader mode; do not block capture waiting for
+  canvas text. Smoke-check output is not experiment evidence.
+- Before launching remote commands, verify their log directory is writable as
+  the pod's postgres user. CNPG's container root filesystem can be read-only,
+  including `/tmp`. Use a verified writable existing volume such as a run-specific
+  directory under `/controller`; do not change the cluster's security settings or
+  put capture logs on the measured DATA/WAL disks to solve a local tooling issue.
+- Run long initialization, UPDATE, and pgbench processes independently of the
+  `kubectl exec` connection. Save native stdout, stderr, PID, and an exit-status
+  marker in the pod, then observe them through reconnectable short reads. An exec
+  WebSocket EOF or nonzero client exit is a transport failure, not proof of SQL
+  failure or rollback. Reconcile native completion output and database activity
+  before declaring the attempt failed. Never blindly retry UPDATE: its commit
+  outcome can be uncertain. Send SIGTERM only after successful UPDATE completion
+  and resumed pgbench writes have been established.
+- Preserve any final pgbench statistics from both stdout and stderr, but do not
+  make their presence an unconditional success check after an intentional stop.
+  These runs have produced native exit status 130 after SIGINT without a final
+  statistics block. Retain the native exit marker and complete logs, document
+  the missing block, and assess the measured window from progress, SQL completion,
+  and replication evidence. Do not discard valid captures or delete disks before
+  Portal capture solely because the optional final statistics are absent.
+  Bound the stop wait too: if SIGINT is ignored after the measured window and
+  native logs are saved, terminate the recorded native pgbench PID and reconcile
+  its exit marker. Do not keep a cluster running until the four-hour workload
+  limit merely to obtain final statistics.
+- Review smoke screenshots with the agent's image-viewing tools. Do not add a
+  human-approval dependency or a short review-acknowledgment timer that tears down
+  a healthy cluster while another precheck is still running. Set bounded run and
+  cleanup deadlines to cover all setup, capture, and verification phases.
+- Budget recovery waits from observed replay speed and backlog. The main UPDATE
+  run took about 35 minutes to reconnect; a 15-minute catch-up timeout discarded
+  an otherwise valid control run with replay still progressing. Allow at least
+  an hour for catch-up in this setup, keep offered load running, and monitor
+  progress within the overall bounded run deadline. Preserve native evidence
+  before cleanup if the deadline is genuinely exhausted.
+- Retry transient AKS DNS/API read failures with bounded timeouts and backoff,
+  especially immediately after cluster creation. A single failed pod-list read
+  after Cluster Ready is not sufficient reason to discard a healthy cluster.
+  Diagnose local configuration or capture failures before declaring the run failed;
+  repair them within a bounded interval if no measured operation has started.
+  If measurement was compromised, preserve its logs and mark the attempt invalid.
+  Clean up failed attempts and verify both resource groups absent before a fresh
+  attempt; never leave a failed cluster running after stopping work.
+- Keep status metadata current: separate previous-attempt errors from the active
+  phase, and record resource IDs, workload-start state, retry reason, and cleanup
+  proof. Do not retain contradictory stale readiness or region fields.
+
+## Capture requirements
+
+The main reproduction and all conditions except the preserved VACUUM variation
+use checkpoint + 5% UPDATE, with disconnect only after successful commit and
+resumed pgbench writes. Record UPDATE start/completion as the purple operation
+events. Preserve historical VACUUM evidence and label new results accurately.
+Existing condition images live in `variations/vacuum-history/`; new condition
+images use the condition prefixes directly under `variations/`.
+For the prefetch-off condition, capture waits about one minute after disconnect
+regardless of how many sessions are waiting on `SyncRep` or whether TPS stalls.
+
 For the main test, collect five real screenshots and one TPS plot:
 
 | File | Contents |
@@ -98,6 +202,12 @@ the expected disk resource name and **Add metric** button, then interact there.
 Wait for the actual curves and numeric legend values to load. A blank chart
 with default axes is not a finished capture. Recent data can take several
 minutes to arrive; refresh after recovery before saving the final images.
+Also wait for the chart's loading mask and three-dot spinner to disappear.
+Old curves and numeric legends can remain visible beneath a loading overlay;
+they do not establish that the latest range or chart-type change has finished.
+Verify filled, stacked read/write areas in the saved image, not just the
+selected Area chart control. Gate successful cleanup on reviewing both final
+Portal images; scheduling capture jobs is not evidence that capture finished.
 
 Before taking the screenshot, reopen the time-range panel and confirm that
 **Time granularity** is still **1 minute**, then close the panel and let the chart
@@ -128,18 +238,19 @@ scripts temporary; do not add a metrics framework or alter the workload.
   a copy inside the pod so an interrupted exec connection does not lose data,
   and copy it out **before cleanup**.
 - Check the pgbench pod's UTC clock against the clock used for event timestamps.
-  Record approximate UTC times for VACUUM start and completion, disconnect,
-  streaming reconnect, and resumed TPS. For preferred durability, also record
-  when synchronous replication is relaxed. Keep these events distinct.
-- Collect baseline, VACUUM, any outage, and recovery through healthy progress
-  after actual streaming reconnect. Keep offered load running throughout this
-  window. A no-disconnect control must cover VACUUM and subsequent catch-up.
+  Record approximate UTC times for UPDATE (or the VACUUM variation) start and
+  completion, disconnect, streaming reconnect, and resumed TPS. For preferred
+  durability, also record when synchronous replication is relaxed. Keep these
+  events distinct.
+- Collect baseline, the bulk operation, any outage, and recovery through healthy
+  progress after actual streaming reconnect. Keep offered load running throughout
+  this window. A no-disconnect control must cover UPDATE and subsequent catch-up.
 
 ### Plot
 
 - Use a standard plotting tool such as Matplotlib to produce a standalone PNG
   from the native timestamp/TPS pairs. Save the main plot as `results/tps.png`
-  and comparison plots as `conditions/<condition>-tps.png`, using the same condition
+  and comparison plots as `variations/<condition>-tps.png`, using the same condition
   prefixes as their other images.
 - Use a consistent **1800 × 600 pixel** canvas, margins, and font sizes for
   every run. Use one chart panel, a white background, light horizontal grid,
@@ -158,9 +269,10 @@ scripts temporary; do not add a metrics framework or alter the workload.
   unmeasured even if the common chart window extends beyond the log.
 - Use exactly one chart panel in **every** run, with the TPS axis fixed at
   0–10. Values above 10 TPS are clipped; state this clearly in the plot.
-- Use the same semantic event colors in every plot: purple for VACUUM start and
-  completion, red for walreceiver SIGTERM, amber for synchronous replication
-  relaxed, green for streaming reconnected, and gray for a first positive TPS
+- Use the same semantic event colors in every plot: purple for bulk-operation
+  start and completion (UPDATE or VACUUM, labeled to match the run), red for
+  walreceiver SIGTERM, amber for synchronous replication relaxed, green for
+  streaming reconnected, and gray for a first positive TPS
   bucket end. Keep each event's color and line style consistent, identify the
   events in a clear legend, and label approximate times as approximate. A first
   positive bucket marker denotes the reporting-interval end, not the exact time
@@ -183,7 +295,7 @@ scripts temporary; do not add a metrics framework or alter the workload.
 
 ## Preferred-durability condition captures
 
-For the two preferred-durability conditions in `conditions/README.md`, save six screenshots:
+For the two preferred-durability conditions in `variations/README.md`, save six screenshots:
 the initial waits, waits about **15 seconds after disconnect**, waits about
 **one minute after that first post-disconnect capture** (about 75 seconds after
 disconnect), waits after actual streaming reconnect, and the two DATA IOPS charts. Preserve the actual watch timestamps
