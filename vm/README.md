@@ -1,6 +1,6 @@
 # VM reproductions
 
-Similar to the rest of this repository, these are generated with AI assistants.
+Similar to the rest of this repository, these are generated with AI assistance.
 They have not been vetted as carefully as the rest of this repository. Review
 the scripts and instructions before running them.
 
