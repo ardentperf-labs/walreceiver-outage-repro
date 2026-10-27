@@ -10,6 +10,10 @@ CloudNativePG runs PostgreSQL **18** on two separate AKS nodes (`Standard_D2s_v6
 WAL disks, host caching disabled, rated up to **500 IOPS**. WAL archives go to
 **Azure Blob Storage**. No metrics stack.
 
+For an UPDATE-only experiment without a disconnect or background workload, see
+the [local cgroup prefetch reproduction](local/prefetch/README.md). It measures
+primary and replica read operations and MB on the same local disk.
+
 ## Setup
 
 Requires Bash, Azure CLI logged in to your subscription, and kubectl:
